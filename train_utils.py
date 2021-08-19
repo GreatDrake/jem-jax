@@ -80,7 +80,7 @@ def train_step_dumb(state, batch, start_x, rng_keys, dummy_1, dummy_2, dummy_3):
 def train_step(state, batch, start_x, rng_keys, sgld_lr, sgld_std, p_x_weight):
     def log_prob(images):
         logits = WRN().apply(state.params, images)
-        return jax.scipy.special.logsumexp(logits)
+        return jax.scipy.special.logsumexp(logits, axis=1).sum()
     log_prob_grad = jax.grad(log_prob)
 
     x_t = start_x
@@ -103,6 +103,7 @@ def train_step(state, batch, start_x, rng_keys, sgld_lr, sgld_std, p_x_weight):
 
         return clf_loss + p_x_weight * gen_loss, (logits, lse_x_hat, lse_x)
 
+ 
     grad_fn = jax.value_and_grad(loss_fn, argnums=0, has_aux=True)
     (_, (logits, lse_x_hat, lse_x)), grads = grad_fn(state.params, batch['image'], x_t)
     state = state.apply_gradients(grads=grads)
