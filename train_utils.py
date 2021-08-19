@@ -14,13 +14,29 @@ import jax_resnet
 
 import functools
 
+
+class CNN(nn.Module):
+  @nn.compact
+  # Provide a constructor to register a new parameter 
+  # and return its initial value
+  def __call__(self, x):
+    x = nn.Conv(features=32, kernel_size=(3, 3))(x)
+    x = nn.relu(x)
+    x = nn.avg_pool(x, window_shape=(2, 2), strides=(2, 2))
+    x = nn.Conv(features=64, kernel_size=(3, 3))(x)
+    x = nn.relu(x)
+    x = nn.avg_pool(x, window_shape=(2, 2), strides=(2, 2))
+    x = x.reshape((x.shape[0], -1)) # Flatten
+    x = nn.Dense(features=256)(x)
+    x = nn.relu(x)
+    x = nn.Dense(features=10)(x)    # There are 10 classes in MNIST
+    return x
+
 #WRN = functools.partial(jax_resnet.WideResNet50, norm_cls=None, n_classes=10)
 #WRN = functools.partial(jax_resnet.WideResNet50, n_classes=10)
 #WRN = functools.partial(jax_resnet.ResNet50, norm_cls=None, n_classes=10)
-WRN = functools.partial(jax_resnet.ResNet50, n_classes=10)
-
-#import example_models
-#WRN = functools.partial(example_models.ResNet50, num_classes=10)
+#WRN = functools.partial(jax_resnet.ResNet50, n_classes=10)
+WRN = CNN
 
 
 def generate_init_sample(key, shape, args):
@@ -155,7 +171,7 @@ def prepare_state(args):
         return schedule
 
     schedule_fn = warmup_and_staircase(args.lr, args.warmup_iters)
-    tx = optax.adam(learning_rate=schedule_fn)
+    tx = optax.adamw(learning_rate=schedule_fn, weight_decay=args.weight_decay)
 
     state = train_state.TrainState.create(apply_fn=cnn.apply, params=params, tx=tx)
 

@@ -29,7 +29,7 @@ NUM_CHANNELS = 3
 MEAN_RGB = [0.5 * 255, 0.5 * 255, 0.5 * 255]
 STDDEV_RGB = [0.5 * 255, 0.5 * 255, 0.5 * 255]
 
-def augment(image, crop_padding=4, flip_lr=True):
+def augment(image, img_std, crop_padding=4, flip_lr=True):
     """Augment small image with random crop and h-flip.
     Args:
         image: image to augment
@@ -54,8 +54,9 @@ def augment(image, crop_padding=4, flip_lr=True):
         # Randomly flip the image horizontally.
         image = tf.image.random_flip_left_right(image)
 
-    return image
+    noise = tf.random.normal(shape=tf.shape(image), mean=0.0, stddev=img_std)
 
+    return image + noise
 
 class CIFAR10DataSource(object):
     """CIFAR-10 data source."""
@@ -71,7 +72,9 @@ class CIFAR10DataSource(object):
 
     CAN_FLIP_HORIZONTALLY = True
 
-    def __init__(self, train_batch_size, eval_batch_size, shuffle_seed=1):
+    def __init__(self, args, shuffle_seed=1):
+        train_batch_size = args.batch_size
+        eval_batch_size = args.eval_batch_size
         mean_rgb = tf.constant(self.MEAN_RGB, shape=[1, 1, 3], dtype=tf.float32)
         std_rgb = tf.constant(self.STDDEV_RGB, shape=[1, 1, 3], dtype=tf.float32)
         if self.CAN_FLIP_HORIZONTALLY is None:
@@ -85,7 +88,7 @@ class CIFAR10DataSource(object):
 
         def _process_train_sample(x):
             image = tf.cast(x['image'], tf.float32)
-            image = augment(image, crop_padding=4, flip_lr=flip_lr)
+            image = augment(image, args.img_std, crop_padding=4, flip_lr=flip_lr)
             image = (image - mean_rgb) / std_rgb
             batch = {'image': image, 'label': x['label']}
             return batch
