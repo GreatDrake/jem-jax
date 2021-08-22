@@ -17,6 +17,8 @@ parser.add_argument("--sgld_std", type=float, default=1e-2)
 parser.add_argument("--p_x_weight", type=float, default=1.0) # weight of loss -LogSumExp(f(x)) + LogSumExp(f(x_hat))
 parser.add_argument("--weight_decay", type=float, default=0.0) 
 parser.add_argument("--img_std", type=float, default=0.03) 
+parser.add_argument("--print_every", type=int, default=10)
+
 args = parser.parse_args()
 args.eval_batch_size = 10000
 

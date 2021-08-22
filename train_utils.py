@@ -35,8 +35,9 @@ class CNN(nn.Module):
 #WRN = functools.partial(jax_resnet.WideResNet50, norm_cls=None, n_classes=10)
 #WRN = functools.partial(jax_resnet.WideResNet50, n_classes=10)
 #WRN = functools.partial(jax_resnet.ResNet50, norm_cls=None, n_classes=10)
-#WRN = functools.partial(jax_resnet.ResNet50, n_classes=10)
-WRN = CNN
+WRN = functools.partial(jax_resnet.ResNet50, n_classes=10)
+#WRN = functools.partial(jax_resnet.ResNet18, norm_cls=None, n_classes=10)
+#WRN = CNN
 
 
 def generate_init_sample(key, shape, args):
@@ -62,6 +63,11 @@ def eval_model(model, test_ds):
     eval_summary = jax.tree_map(lambda x: x.item(), metrics)
     return eval_summary['loss'], eval_summary['accuracy']
 
+def clip_grad_norm(grad, max_norm):
+    norm = jnp.linalg.norm(jax.tree_util.tree_leaves(jax.tree_map(jnp.linalg.norm, grad)))
+    factor = jnp.minimum(1, max_norm / (norm + 1e-6))
+    return jax.tree_map((lambda x: x * factor), grad)
+
 @functools.partial(jax.jit, static_argnums=(4, 5, 6))
 def train_step_dumb(state, batch, start_x, rng_keys, dummy_1, dummy_2, dummy_3):
     def loss_fn(params):
@@ -74,6 +80,7 @@ def train_step_dumb(state, batch, start_x, rng_keys, dummy_1, dummy_2, dummy_3):
     (_, logits), grads = grad_fn(state.params)
     state = state.apply_gradients(grads=grads)
     metrics = compute_metrics(logits, batch['label'])
+    metrics["grad_norm"] = jnp.linalg.norm(jax.tree_util.tree_leaves(jax.tree_map(jnp.linalg.norm, grads)))
     return state, metrics, start_x
 
 @functools.partial(jax.jit, static_argnums=(4, 5, 6))
@@ -106,31 +113,36 @@ def train_step(state, batch, start_x, rng_keys, sgld_lr, sgld_std, p_x_weight):
  
     grad_fn = jax.value_and_grad(loss_fn, argnums=0, has_aux=True)
     (_, (logits, lse_x_hat, lse_x)), grads = grad_fn(state.params, batch['image'], x_t)
-    state = state.apply_gradients(grads=grads)
+    
+    state = state.apply_gradients(grads=clip_grad_norm(grads, 20))
+
     metrics = compute_metrics(logits, batch['label'])
     metrics["lse_x_hat"] = lse_x_hat
     metrics["lse_x"] = lse_x
+    metrics["grad_norm"] = jnp.linalg.norm(jax.tree_util.tree_leaves(jax.tree_map(jnp.linalg.norm, grads)))
+
     return state, metrics, x_t
 
+def print_metrics(metrics, args):
+    mean_metrics = {
+        k: np.mean([m[k] for m in metrics])
+        for k in metrics[0]}
+
+    print('Mean, loss: %.4f, accuracy: %.2f' % (mean_metrics['loss'], mean_metrics['accuracy'] * 100))
+    if args.xent_only == 0:
+        print('lse_x_hat: %.4f, lse_x: %.2f' % (metrics[-1]['lse_x_hat'], metrics[-1]['lse_x']))
+        print('diff: %.4f' % (metrics[-1]['lse_x_hat'] - metrics[-1]['lse_x'],))
+    print('gradient norm: %.4f' % (metrics[-1]['grad_norm']))
 
 def train_epoch(state, train_iter, epoch, steps_per_epoch, replay_buffer, key, args):
     batch_metrics = []
     step_fn = train_step_dumb if args.xent_only == 1 else train_step
 
-    cnt = 0
     for step, batch in zip(range(steps_per_epoch), train_iter):
-        cnt += args.batch_size
-        if cnt > args.batch_size and cnt // args.batch_size % 10 == 0:
-            training_batch_metrics = jax.device_get(batch_metrics)
-            training_epoch_metrics = {
-                k: np.mean([metrics[k] for metrics in training_batch_metrics])
-                for k in training_batch_metrics[0]}
-
-            print('loss: %.4f, accuracy: %.2f' % (training_epoch_metrics['loss'], training_epoch_metrics['accuracy'] * 100))
-            if args.xent_only == 0:
-                print('lse_x_hat: %.4f, lse_x: %.2f' % (training_epoch_metrics['lse_x_hat'], training_epoch_metrics['lse_x']))
-                print('gen loss: %.4f' % (training_epoch_metrics['lse_x_hat'] - training_epoch_metrics['lse_x'],))
-            print(cnt)
+        if step > 0 and step % args.print_every == 0:
+            #print('step: %d, train samples: %d' % (step, step * args.batch_size))
+            print(step * args.batch_size)
+            print_metrics(jax.device_get(batch_metrics), args)
 
         batch = to_jax_batch(batch)
 
