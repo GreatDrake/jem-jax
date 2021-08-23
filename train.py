@@ -1,4 +1,4 @@
-from train_utils import generate_init_sample, prepare_state, train_epoch, eval_model
+from train_utils import generate_init_sample, prepare_state, train_epoch, eval_model, save_model
 import time
 import argparse
 import input_pipeline
@@ -18,6 +18,8 @@ parser.add_argument("--p_x_weight", type=float, default=1.0) # weight of loss -L
 parser.add_argument("--weight_decay", type=float, default=0.0) 
 parser.add_argument("--img_std", type=float, default=0.03) 
 parser.add_argument("--print_every", type=int, default=10)
+parser.add_argument("--save_dir", type=str, default='./saved_models')
+parser.add_argument("--ckpt_every", type=int, default=100000)
 
 args = parser.parse_args()
 args.eval_batch_size = 10000
@@ -35,6 +37,8 @@ print("model init started")
 state, key = prepare_state(args)
 print("model init finished")
 
+save_model(state.params["params"], args, 'start_params_only.pt')
+
 num_epochs = 150
 
 key, subkey = jax.random.split(key)
@@ -47,3 +51,5 @@ for epoch in range(1, num_epochs + 1):
     state, train_metrics, replay_buffer = train_epoch(state, train_iter, epoch, steps_per_epoch, replay_buffer, subkey, args)
     test_loss, test_accuracy = eval_model(state.params, test_ds)
     print('Testing - epoch: %d, loss: %.2f, accuracy: %.2f' % (epoch, test_loss, test_accuracy * 100))
+    if epoch % args.ckpt_every == 0:
+        save_model(state, args, f'ckpt_{epoch}.pt')

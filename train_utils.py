@@ -2,6 +2,7 @@ import jax
 import jax.numpy as jnp               # JAX NumPy
 from jax import grad
 
+import flax
 from flax import linen as nn          # The Linen API
 from flax.training import train_state
 import optax                          # The Optax gradient processing and optimization library
@@ -13,7 +14,7 @@ from input_pipeline import to_jax_batch
 import jax_resnet
 
 import functools
-
+import os.path
 
 class CNN(nn.Module):
   @nn.compact
@@ -35,9 +36,9 @@ class CNN(nn.Module):
 #WRN = functools.partial(jax_resnet.WideResNet50, norm_cls=None, n_classes=10)
 #WRN = functools.partial(jax_resnet.WideResNet50, n_classes=10)
 #WRN = functools.partial(jax_resnet.ResNet50, norm_cls=None, n_classes=10)
-WRN = functools.partial(jax_resnet.ResNet50, n_classes=10)
+#WRN = functools.partial(jax_resnet.ResNet50, n_classes=10)
 #WRN = functools.partial(jax_resnet.ResNet18, norm_cls=None, n_classes=10)
-#WRN = CNN
+WRN = CNN
 
 
 def generate_init_sample(key, shape, args):
@@ -189,3 +190,12 @@ def prepare_state(args):
     state = train_state.TrainState.create(apply_fn=cnn.apply, params=params, tx=tx)
 
     return state, key
+
+def save_model(state, args, filename):
+    with open(os.path.join(args.save_dir, filename), "wb") as f:
+        f.write(flax.serialization.to_bytes(state))
+
+def load_model(state, args, filename):
+    with open(os.path.join(args.save_dir, filename), "rb") as f:
+        new_state = flax.serialization.from_bytes(state, f.read())
+    return new_state
