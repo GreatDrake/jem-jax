@@ -10,6 +10,7 @@ import optax                          # The Optax gradient processing and optimi
 import numpy as np                    # Ordinary NumPy
 
 from input_pipeline import to_jax_batch
+from image_utils import save_image_grid
 
 import jax_resnet
 
@@ -160,6 +161,10 @@ def train_epoch(state, train_iter, epoch, steps_per_epoch, replay_buffer, key, a
         batch_metrics.append(metrics)
 
         replay_buffer = jax.ops.index_update(replay_buffer, old_idx, samples)
+
+        if step % args.save_img_every == 0:
+            img_name = "imgs/sample_%d_%d.png" % (epoch, step)
+            save_image_grid(os.path.join(args.save_dir, img_name), samples[:16], 4, 4)
 
     training_batch_metrics = jax.device_get(batch_metrics)
     training_epoch_metrics = {

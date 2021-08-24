@@ -20,6 +20,7 @@ parser.add_argument("--img_std", type=float, default=0.03)
 parser.add_argument("--print_every", type=int, default=10)
 parser.add_argument("--save_dir", type=str, default='./saved_models')
 parser.add_argument("--ckpt_every", type=int, default=100000)
+parser.add_argument("--save_img_every", type=int, default=200)
 
 args = parser.parse_args()
 args.eval_batch_size = 10000
@@ -38,6 +39,7 @@ state, key = prepare_state(args)
 print("model init finished")
 
 save_model(state.params["params"], args, 'start_params_only.pt')
+save_model(state, args, 'start_state.pt')
 
 num_epochs = 150
 
