@@ -1,8 +1,9 @@
-from train_utils import generate_init_sample, prepare_state, train_epoch, eval_model, save_model
+from train_utils import WRN, generate_init_sample, prepare_state, train_epoch, eval_model, save_model, load_model
 import time
 import argparse
 import input_pipeline
 import jax
+import jax.numpy as jnp
 
 parser = argparse.ArgumentParser("Energy Based Models")
 parser.add_argument("--batch_size", type=int, default=64)
@@ -21,6 +22,8 @@ parser.add_argument("--print_every", type=int, default=10)
 parser.add_argument("--save_dir", type=str, default='./saved_models')
 parser.add_argument("--ckpt_every", type=int, default=100000)
 parser.add_argument("--save_img_every", type=int, default=200)
+parser.add_argument("--load_file", type=str)
+parser.add_argument("--seed", type=int, default=54)
 
 args = parser.parse_args()
 args.eval_batch_size = 10000
@@ -36,15 +39,21 @@ print("data init finished")
 
 print("model init started")
 state, key = prepare_state(args)
+state_dict = None
+if args.load_file:
+    state_dict = load_model(state, args, args.load_file)
+    state = state_dict["state"]
 print("model init finished")
 
-save_model(state.params["params"], args, 'start_params_only.pt')
-save_model(state, args, 'start_state.pt')
+save_model(state.params["params"], jnp.ones((1, 32, 32, 3)), args, 'start_params_only.pt')
+save_model(state, jnp.ones((args.replay_buffer_size, 32, 32, 3)), args, 'start_state.pt')
 
 num_epochs = 150
 
 key, subkey = jax.random.split(key)
 replay_buffer = generate_init_sample(subkey, (args.replay_buffer_size, 32, 32, 3), args)
+if state_dict is not None:
+    replay_buffer = state_dict["replay_buffer"]
 
 print("training started")
 
@@ -54,4 +63,4 @@ for epoch in range(1, num_epochs + 1):
     test_loss, test_accuracy = eval_model(state.params, test_ds)
     print('Testing - epoch: %d, loss: %.2f, accuracy: %.2f' % (epoch, test_loss, test_accuracy * 100))
     if epoch % args.ckpt_every == 0:
-        save_model(state, args, f'ckpt_{epoch}.pt')
+        save_model(state, replay_buffer, args, f'{WRN.func.__name__}_ckpt_{epoch}.pt')

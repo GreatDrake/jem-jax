@@ -25,12 +25,21 @@ class CNN(nn.Module):
     x = nn.Conv(features=32, kernel_size=(3, 3))(x)
     x = nn.relu(x)
     x = nn.avg_pool(x, window_shape=(2, 2), strides=(2, 2))
+    
+    x = nn.Dropout(0.1)(x, deterministic=True)
+
     x = nn.Conv(features=64, kernel_size=(3, 3))(x)
     x = nn.relu(x)
     x = nn.avg_pool(x, window_shape=(2, 2), strides=(2, 2))
+    
+    x = nn.Dropout(0.1)(x, deterministic=True)
+
     x = x.reshape((x.shape[0], -1)) # Flatten
     x = nn.Dense(features=256)(x)
     x = nn.relu(x)
+
+    x = nn.Dropout(0.2)(x, deterministic=True)    
+
     x = nn.Dense(features=10)(x)    # There are 10 classes in MNIST
     return x
 
@@ -39,7 +48,7 @@ class CNN(nn.Module):
 #WRN = functools.partial(jax_resnet.ResNet50, norm_cls=None, n_classes=10)
 #WRN = functools.partial(jax_resnet.ResNet50, n_classes=10)
 #WRN = functools.partial(jax_resnet.ResNet18, norm_cls=None, n_classes=10)
-WRN = CNN
+WRN = functools.partial(CNN)
 
 
 def generate_init_sample(key, shape, args):
@@ -111,12 +120,15 @@ def train_step(state, batch, start_x, rng_keys, sgld_lr, sgld_std, p_x_weight):
         gen_loss = lse_x_hat - lse_x
 
         return clf_loss + p_x_weight * gen_loss, (logits, lse_x_hat, lse_x)
+        
+        #exp_xy = jnp.mean((logits * jax.nn.one_hot(batch['label'], num_classes=10)).sum(axis=1))
+        #return -exp_xy + lse_x_hat, (logits, lse_x_hat, lse_x)
 
  
     grad_fn = jax.value_and_grad(loss_fn, argnums=0, has_aux=True)
     (_, (logits, lse_x_hat, lse_x)), grads = grad_fn(state.params, batch['image'], x_t)
     
-    state = state.apply_gradients(grads=clip_grad_norm(grads, 20))
+    state = state.apply_gradients(grads=clip_grad_norm(grads, 15))
 
     metrics = compute_metrics(logits, batch['label'])
     metrics["lse_x_hat"] = lse_x_hat
@@ -142,7 +154,6 @@ def train_epoch(state, train_iter, epoch, steps_per_epoch, replay_buffer, key, a
 
     for step, batch in zip(range(steps_per_epoch), train_iter):
         if step > 0 and step % args.print_every == 0:
-            #print('step: %d, train samples: %d' % (step, step * args.batch_size))
             print(step * args.batch_size)
             print_metrics(jax.device_get(batch_metrics), args)
 
@@ -176,11 +187,11 @@ def train_epoch(state, train_iter, epoch, steps_per_epoch, replay_buffer, key, a
     return state, training_epoch_metrics, replay_buffer
 
 def prepare_state(args):
-    rng = jax.random.PRNGKey(54)
+    rng = jax.random.PRNGKey(args.seed)
     key, init_key = jax.random.split(rng)
 
     cnn = WRN()
-    params = cnn.init(init_key, jnp.ones([1, 32, 32, 3]))
+    params = cnn.init(init_key, jnp.ones((1, 32, 32, 3)))
 
     def warmup_and_staircase(value, warmup_iters):
         def schedule(count):
@@ -196,11 +207,19 @@ def prepare_state(args):
 
     return state, key
 
-def save_model(state, args, filename):
+def save_model(state, replay_buffer, args, filename):
+    ckpt_dict = {
+        "state": state,
+        "replay_buffer": replay_buffer
+    }
     with open(os.path.join(args.save_dir, filename), "wb") as f:
-        f.write(flax.serialization.to_bytes(state))
+        f.write(flax.serialization.to_bytes(ckpt_dict))
 
 def load_model(state, args, filename):
+    ckpt_dict = {
+         "state": state,
+         "replay_buffer": jnp.ones((args.replay_buffer_size, 32, 32, 3))
+     }
     with open(os.path.join(args.save_dir, filename), "rb") as f:
-        new_state = flax.serialization.from_bytes(state, f.read())
-    return new_state
+        new_dict = flax.serialization.from_bytes(ckpt_dict, f.read())
+    return new_dict
