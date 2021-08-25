@@ -17,39 +17,15 @@ import jax_resnet
 import functools
 import os.path
 
-class CNN(nn.Module):
-  @nn.compact
-  # Provide a constructor to register a new parameter 
-  # and return its initial value
-  def __call__(self, x):
-    x = nn.Conv(features=32, kernel_size=(3, 3))(x)
-    x = nn.relu(x)
-    x = nn.avg_pool(x, window_shape=(2, 2), strides=(2, 2))
-    
-    x = nn.Dropout(0.1)(x, deterministic=True)
-
-    x = nn.Conv(features=64, kernel_size=(3, 3))(x)
-    x = nn.relu(x)
-    x = nn.avg_pool(x, window_shape=(2, 2), strides=(2, 2))
-    
-    x = nn.Dropout(0.1)(x, deterministic=True)
-
-    x = x.reshape((x.shape[0], -1)) # Flatten
-    x = nn.Dense(features=256)(x)
-    x = nn.relu(x)
-
-    x = nn.Dropout(0.2)(x, deterministic=True)    
-
-    x = nn.Dense(features=10)(x)    # There are 10 classes in MNIST
-    return x
 
 #WRN = functools.partial(jax_resnet.WideResNet50, norm_cls=None, n_classes=10)
 #WRN = functools.partial(jax_resnet.WideResNet50, n_classes=10)
 #WRN = functools.partial(jax_resnet.ResNet50, norm_cls=None, n_classes=10)
 #WRN = functools.partial(jax_resnet.ResNet50, n_classes=10)
 #WRN = functools.partial(jax_resnet.ResNet18, norm_cls=None, n_classes=10)
-WRN = functools.partial(CNN)
 
+import models
+WRN = functools.partial(models.CNN)
 
 def generate_init_sample(key, shape, args):
     return jax.random.uniform(key, shape=shape, minval=-1, maxval=1)
@@ -146,10 +122,11 @@ def print_metrics(metrics, args):
     if args.xent_only == 0:
         print('lse_x_hat: %.4f, lse_x: %.2f' % (metrics[-1]['lse_x_hat'], metrics[-1]['lse_x']))
         print('diff: %.4f' % (metrics[-1]['lse_x_hat'] - metrics[-1]['lse_x'],))
+        
+        if metrics[-1]['lse_x_hat'] < -1e4:
+            raise Exception('Model diverged （>﹏<）')
     print('gradient norm: %.4f' % (metrics[-1]['grad_norm']))
 
-    if metrics[-1]['lse_x_hat'] < -1e4:
-        raise Exception('Model diverged （>﹏<）')
 
 def train_epoch(state, train_iter, epoch, steps_per_epoch, replay_buffer, key, args):
     batch_metrics = []
@@ -205,7 +182,8 @@ def prepare_state(args):
 
     schedule_fn = warmup_and_staircase(args.lr, args.warmup_iters)
     tx = optax.adamw(learning_rate=schedule_fn, weight_decay=args.weight_decay)
-
+    #tx = optax.sgd(learning_rate=schedule_fn, momentum=0.9)
+  
     state = train_state.TrainState.create(apply_fn=cnn.apply, params=params, tx=tx)
 
     return state, key

@@ -2,7 +2,7 @@ import numpy as np
 from PIL import Image
 
 def img_format(img):
-    img = np.clip(np.array(img), -1, 1)
+    img = np.clip(np.array(img).astype(np.float32), -1, 1)
     return ((img + 1) / 2 * 255).astype(np.uint8)
 
 def save_image(filename, img):
