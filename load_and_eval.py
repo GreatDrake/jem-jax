@@ -14,12 +14,15 @@ parser.add_argument("--filename", type=str)
 
 args = parser.parse_args()
 args.eval_batch_size = 10000
+args.seed = 54
+args.replay_buffer_size = 10000
 
 data_source = input_pipeline.CIFAR10DataSource(args)
 test_ds = input_pipeline.to_jax_batch(next(iter(data_source.eval_ds)))
 
 init_state, key = prepare_state(args)
-state = load_model(init_state, args, args.filename)
+state_dict = load_model(init_state, args, args.filename)
+state = state_dict["state"]
 
 print("model loading finished")
 

@@ -148,6 +148,9 @@ def print_metrics(metrics, args):
         print('diff: %.4f' % (metrics[-1]['lse_x_hat'] - metrics[-1]['lse_x'],))
     print('gradient norm: %.4f' % (metrics[-1]['grad_norm']))
 
+    if metrics[-1]['lse_x_hat'] < -1e4:
+        raise Exception('Model diverged （>﹏<）')
+
 def train_epoch(state, train_iter, epoch, steps_per_epoch, replay_buffer, key, args):
     batch_metrics = []
     step_fn = train_step_dumb if args.xent_only == 1 else train_step
