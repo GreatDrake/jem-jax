@@ -16,7 +16,13 @@ import jax_resnet
 
 import functools
 import os.path
+from sys import stdout
 
+import models
+
+
+from jax.config import config
+#config.update("jax_enable_x64", True)
 
 #WRN = functools.partial(jax_resnet.WideResNet50, norm_cls=None, n_classes=10)
 #WRN = functools.partial(jax_resnet.WideResNet50, n_classes=10)
@@ -24,8 +30,9 @@ import os.path
 #WRN = functools.partial(jax_resnet.ResNet50, n_classes=10)
 #WRN = functools.partial(jax_resnet.ResNet18, norm_cls=None, n_classes=10)
 
-import models
-WRN = functools.partial(models.CNN)
+#WRN = functools.partial(models.CNN)
+
+WRN = functools.partial(models.WideResNet, num_classes=10, depth=28, widen_factor=1)
 
 def generate_init_sample(key, shape, args):
     return jax.random.uniform(key, shape=shape, minval=-1, maxval=1)
@@ -77,6 +84,9 @@ def train_step(state, batch, start_x, rng_keys, sgld_lr, sgld_std, p_x_weight):
         return jax.scipy.special.logsumexp(logits, axis=1).sum()
     log_prob_grad = jax.grad(log_prob)
 
+    #sgld_step = lambda t, x_t: sgld_lr * log_prob_grad(x_t) + sgld_std * jax.random.normal(rng_keys[t], shape=x_t.shape) + x_t
+    #x_t = jax.lax.fori_loop(0, len(rng_keys), sgld_step, start_x)
+
     x_t = start_x
     for t in range(len(rng_keys)):
         d = sgld_lr * log_prob_grad(x_t) + sgld_std * jax.random.normal(rng_keys[t], shape=x_t.shape)
@@ -104,7 +114,8 @@ def train_step(state, batch, start_x, rng_keys, sgld_lr, sgld_std, p_x_weight):
     grad_fn = jax.value_and_grad(loss_fn, argnums=0, has_aux=True)
     (_, (logits, lse_x_hat, lse_x)), grads = grad_fn(state.params, batch['image'], x_t)
     
-    state = state.apply_gradients(grads=clip_grad_norm(grads, 15))
+    state = state.apply_gradients(grads=grads)
+    #state = state.apply_gradients(grads=clip_grad_norm(grads, 15))
 
     metrics = compute_metrics(logits, batch['label'])
     metrics["lse_x_hat"] = lse_x_hat
@@ -117,7 +128,7 @@ def print_metrics(metrics, args):
     mean_metrics = {
         k: np.mean([m[k] for m in metrics])
         for k in metrics[0]}
-
+    
     print('Mean, loss: %.4f, accuracy: %.2f' % (mean_metrics['loss'], mean_metrics['accuracy'] * 100))
     if args.xent_only == 0:
         print('lse_x_hat: %.4f, lse_x: %.2f' % (metrics[-1]['lse_x_hat'], metrics[-1]['lse_x']))
@@ -126,7 +137,7 @@ def print_metrics(metrics, args):
         if metrics[-1]['lse_x_hat'] < -1e4:
             raise Exception('Model diverged （>﹏<）')
     print('gradient norm: %.4f' % (metrics[-1]['grad_norm']))
-
+    stdout.flush()
 
 def train_epoch(state, train_iter, epoch, steps_per_epoch, replay_buffer, key, args):
     batch_metrics = []

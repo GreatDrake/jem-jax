@@ -11,6 +11,7 @@ class WideBlock(nn.Module):
     conv: ModuleDef
     act: Callable
     strides: Tuple[int, int] = (1, 1)
+    strides_helper = jnp.zeros(strides)
 
     @nn.compact
     def __call__(self, x,):
@@ -20,9 +21,9 @@ class WideBlock(nn.Module):
         y = self.act(x)
         y = self.conv(self.filters, (3, 3), self.strides, padding=[(1,1), (1,1)])(y)
 
-        #if residual.shape != y.shape:
-        residual = self.conv(self.filters, (1, 1),
-                             self.strides, name='conv_proj')(residual)
+        if residual.shape != y.shape or self.strides_helper.shape != (1, 1):
+            residual = self.conv(self.filters, (1, 1),
+                                 self.strides, name='conv_proj')(residual)
 
         return residual + y
 
@@ -52,12 +53,13 @@ class WideResNet(nn.Module):
 
         out = _wide_layer(out, nStages[1], n, (1, 1))
         out = _wide_layer(out, nStages[2], n, (2, 2))
-        out = _wide_layer(out, nStages[3], n, (3, 3))  
+        out = _wide_layer(out, nStages[3], n, (2, 2))  
     
         out = self.act(out)
 
-        #out = nn.avg_pool(out, window_shape=(8, 8))
-        out = jnp.mean(out, axis=(1, 2))    
+        out = nn.avg_pool(out, window_shape=(8, 8))
+        out = out.reshape((out.shape[0], -1))
+        #out = jnp.mean(out, axis=(1, 2))    
 
         out = nn.Dense(self.num_classes)(out)
     
