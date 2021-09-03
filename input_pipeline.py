@@ -72,7 +72,7 @@ class CIFAR10DataSource(object):
 
     CAN_FLIP_HORIZONTALLY = True
 
-    def __init__(self, args, shuffle_seed=1):
+    def __init__(self, args):
         train_batch_size = args.batch_size
         eval_batch_size = args.eval_batch_size
         mean_rgb = tf.constant(self.MEAN_RGB, shape=[1, 1, 3], dtype=tf.float32)
@@ -84,7 +84,7 @@ class CIFAR10DataSource(object):
         # Training set
         train_ds = tfds.load('cifar10', split='train').cache()
         train_ds = train_ds.repeat()
-        train_ds = train_ds.shuffle(16 * train_batch_size, seed=shuffle_seed)
+        train_ds = train_ds.shuffle(16 * train_batch_size, seed=args.seed)
 
         def _process_train_sample(x):
             image = tf.cast(x['image'], tf.float32)
