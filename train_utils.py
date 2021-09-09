@@ -78,7 +78,7 @@ def train_step_dumb(state, batch, start_x, rng_keys, dummy_1, dummy_2, dummy_3):
     return state, metrics, start_x
 
 @functools.partial(jax.jit, static_argnums=(4, 5, 6))
-def train_step(state, batch, start_x, rng_keys, sgld_lr, sgld_std, p_x_weight):
+def train_step(state, batch, x_t, rng_keys, sgld_lr, sgld_std, p_x_weight):
     def log_prob(images):
         logits = WRN().apply(state.params, images)
         return jax.scipy.special.logsumexp(logits, axis=1).sum()
@@ -87,10 +87,8 @@ def train_step(state, batch, start_x, rng_keys, sgld_lr, sgld_std, p_x_weight):
     #sgld_step = lambda t, x_t: sgld_lr * log_prob_grad(x_t) + sgld_std * jax.random.normal(rng_keys[t], shape=x_t.shape) + x_t
     #x_t = jax.lax.fori_loop(0, len(rng_keys), sgld_step, start_x)
 
-    x_t = start_x
     for t in range(len(rng_keys)):
-        d = sgld_lr * log_prob_grad(x_t) + sgld_std * jax.random.normal(rng_keys[t], shape=x_t.shape)
-        x_t += d
+        x_t += sgld_lr * log_prob_grad(x_t) + sgld_std * jax.random.normal(rng_keys[t], shape=x_t.shape)
 
     def loss_fn(params, x, x_hat):
         logits = WRN().apply(params, x)
@@ -113,14 +111,20 @@ def train_step(state, batch, start_x, rng_keys, sgld_lr, sgld_std, p_x_weight):
  
     grad_fn = jax.value_and_grad(loss_fn, argnums=0, has_aux=True)
     (_, (logits, lse_x_hat, lse_x)), grads = grad_fn(state.params, batch['image'], x_t)
-    
+   
+    #state = jax.lax.cond(
+    #    lse_x_hat > 0,
+    #    lambda _: state.apply_gradients(grads=grads),
+    #    lambda _: state,
+    #    operand=None) 
     state = state.apply_gradients(grads=grads)
     #state = state.apply_gradients(grads=clip_grad_norm(grads, 15))
 
     metrics = compute_metrics(logits, batch['label'])
     metrics["lse_x_hat"] = lse_x_hat
     metrics["lse_x"] = lse_x
-    metrics["grad_norm"] = jnp.linalg.norm(jax.tree_util.tree_leaves(jax.tree_map(jnp.linalg.norm, grads)))
+    metrics["grad_norm"] = jnp.linalg.norm(jax.tree_util.tree_leaves(jax.tree_map(jnp.linalg.norm, grads))) 
+    metrics["weights_norm"] = jnp.linalg.norm(jax.tree_util.tree_leaves(jax.tree_map(jnp.linalg.norm, state.params['params'])))
 
     return state, metrics, x_t
 
@@ -136,6 +140,7 @@ def print_metrics(metrics, args):
         
         if metrics[-1]['lse_x_hat'] < -1e4:
             raise Exception('Model diverged （>﹏<）')
+        print('weights norm: %.4f' % (metrics[-1]['weights_norm']))
     print('gradient norm: %.4f' % (metrics[-1]['grad_norm']))
     stdout.flush()
 
