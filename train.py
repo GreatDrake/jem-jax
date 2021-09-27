@@ -4,6 +4,7 @@ import argparse
 import input_pipeline
 import jax
 import jax.numpy as jnp
+import sys
 
 parser = argparse.ArgumentParser("Energy Based Models")
 parser.add_argument("--batch_size", type=int, default=64)
@@ -26,7 +27,7 @@ parser.add_argument("--load_file", type=str)
 parser.add_argument("--seed", type=int, default=54)
 
 args = parser.parse_args()
-args.eval_batch_size = 10000
+args.eval_batch_size = 100
 
 print("data init started")
 data_source = input_pipeline.CIFAR10DataSource(args)
@@ -34,7 +35,8 @@ train_ds = data_source.train_ds
 train_iter = iter(train_ds)
 steps_per_epoch = data_source.TRAIN_IMAGES // args.batch_size
 
-test_ds = input_pipeline.to_jax_batch(next(iter(data_source.eval_ds)))
+eval_steps = data_source.EVAL_IMAGES // args.eval_batch_size
+eval_iter = iter(data_source.eval_ds)
 print("data init finished")
 
 print("model init started")
@@ -56,11 +58,12 @@ if state_dict is not None:
     replay_buffer = state_dict["replay_buffer"]
 
 print("training started")
+sys.stdout.flush()
 
 for epoch in range(1, num_epochs + 1):
     key, subkey = jax.random.split(key)
-    state, train_metrics, replay_buffer = train_epoch(state, train_iter, epoch, steps_per_epoch, replay_buffer, subkey, args)
-    test_loss, test_accuracy = eval_model(state.params, test_ds)
+    state, train_metrics, replay_buffer = train_epoch(state, train_iter, epoch, steps_per_epoch, replay_buffer, subkey, args) 
+    test_loss, test_accuracy = eval_model(state.params, eval_iter, eval_steps)
     print('Testing - epoch: %d, loss: %.2f, accuracy: %.2f' % (epoch, test_loss, test_accuracy * 100))
     if epoch % args.ckpt_every == 0:
         save_model(state, replay_buffer, args, f'{WRN.func.__name__}_ckpt_{epoch}.pt')
