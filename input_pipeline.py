@@ -18,6 +18,8 @@ import tensorflow.compat.v2 as tf
 import tensorflow_datasets as tfds
 import jax
 
+tf.random.set_seed(0)
+
 HEIGHT = 32
 WIDTH = 32
 NUM_CHANNELS = 3
@@ -54,9 +56,7 @@ def augment(image, img_std, crop_padding=4, flip_lr=True):
         # Randomly flip the image horizontally.
         image = tf.image.random_flip_left_right(image)
 
-    noise = tf.random.normal(shape=tf.shape(image), mean=0.0, stddev=img_std)
-
-    return image + noise
+    return image
 
 class CIFAR10DataSource(object):
     """CIFAR-10 data source."""
@@ -84,12 +84,13 @@ class CIFAR10DataSource(object):
         # Training set
         train_ds = tfds.load('cifar10', split='train').cache()
         train_ds = train_ds.repeat()
-        train_ds = train_ds.shuffle(16 * train_batch_size, seed=args.seed)
+        train_ds = train_ds.shuffle(50000, seed=args.seed)
 
         def _process_train_sample(x):
             image = tf.cast(x['image'], tf.float32)
             image = augment(image, args.img_std, crop_padding=4, flip_lr=flip_lr)
             image = (image - mean_rgb) / std_rgb
+            image = image + tf.random.normal(shape=tf.shape(image), mean=0.0, stddev=args.img_std)
             batch = {'image': image, 'label': x['label']}
             return batch
 
@@ -104,6 +105,7 @@ class CIFAR10DataSource(object):
         def _process_test_sample(x):
             image = tf.cast(x['image'], tf.float32)
             image = (image - mean_rgb) / std_rgb
+            image = image + tf.random.normal(shape=tf.shape(image), mean=0.0, stddev=args.img_std)
             batch = {'image': image, 'label': x['label']}
             return batch
 

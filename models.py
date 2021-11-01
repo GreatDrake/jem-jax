@@ -5,8 +5,8 @@ from flax import linen as nn
 import jax.numpy as jnp
 
 ModuleDef = Any
-#ModuleConv = partial(nn.Conv, use_bias=True, kernel_init=nn.initializers.variance_scaling(jnp.sqrt(2), "fan_avg", "uniform"), bias_init=nn.initializers.zeros)
-ModuleConv = partial(nn.Conv, use_bias=True, kernel_init=nn.initializers.xavier_uniform(), bias_init=nn.initializers.zeros)
+Init = nn.initializers.variance_scaling(1/3, "fan_in", "uniform")
+Conv = partial(nn.Conv, use_bias=True, kernel_init=Init, bias_init=nn.initializers.zeros)
 
 class WideBlock(nn.Module):
     filters: int
@@ -38,7 +38,7 @@ class WideResNet(nn.Module):
 
     @nn.compact
     def __call__(self, x):
-        conv = ModuleConv
+        conv = Conv
 
         n = (self.depth-4)//6
         k = self.widen_factor
@@ -62,58 +62,26 @@ class WideResNet(nn.Module):
         x = nn.avg_pool(x, window_shape=(8, 8))
         x = x.reshape((x.shape[0], -1))
 
-        x = nn.Dense(self.num_classes)(x)
+        x = nn.Dense(self.num_classes, kernel_init=Init)(x)
     
-        return x
-
-
-class CNN2(nn.Module):
-    @nn.compact
-    def __call__(self, x):
-        x = ModuleConv(features=16, kernel_size=(3, 3))(x)
-        x = nn.relu(x)
-        x = ModuleConv(features=32, kernel_size=(3, 3))(x)
-        x = nn.relu(x)
-        x = nn.max_pool(x, window_shape=(2, 2))
-        #x = nn.Dropout(0.1)(x, deterministic=True)
-        
-        x = ModuleConv(features=32, kernel_size=(3, 3))(x)
-        x = nn.relu(x)
-        x = ModuleConv(features=64, kernel_size=(3, 3))(x)
-        x = nn.relu(x)
-        x = nn.max_pool(x, window_shape=(2, 2))
-        #x = nn.Dropout(0.1)(x, deterministic=True)
-
-        x = x.reshape((x.shape[0], -1)) # Flatten
-        x = nn.Dense(features=256)(x)
-        x = nn.relu(x)
-
-        #x = nn.Dropout(0.2)(x, deterministic=True)    
-
-        x = nn.Dense(features=10)(x)    # There are 10 classes in MNIST
         return x
 
 class CNN(nn.Module):
     @nn.compact
     def __call__(self, x):
-        x = ModuleConv(features=32, kernel_size=(3, 3))(x)
+        x = Conv(features=32, kernel_size=(3, 3))(x)
         x = nn.leaky_relu(x, 0.05)
         x = nn.avg_pool(x, window_shape=(2, 2), strides=(2, 2))
     
-        #x = nn.Dropout(0.1)(x, deterministic=True)
-
-        x = ModuleConv(features=64, kernel_size=(3, 3))(x)
+        x = Conv(features=64, kernel_size=(3, 3))(x)
         x = nn.leaky_relu(x, 0.05)
         x = nn.avg_pool(x, window_shape=(2, 2), strides=(2, 2))
     
-        #x = nn.Dropout(0.1)(x, deterministic=True)
-
         x = x.reshape((x.shape[0], -1)) # Flatten
-        x = nn.Dense(features=256)(x)
+        x = nn.Dense(features=256, kernel_init=Init)(x)
         x = nn.leaky_relu(x, 0.05)
 
-        #x = nn.Dropout(0.2)(x, deterministic=True)    
 
-        x = nn.Dense(features=10)(x)    # There are 10 classes in MNIST
+        x = nn.Dense(features=10, kernel_init=Init)(x)    # There are 10 classes in MNIST
         return x
 

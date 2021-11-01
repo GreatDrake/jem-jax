@@ -37,6 +37,12 @@ steps_per_epoch = data_source.TRAIN_IMAGES // args.batch_size
 
 eval_steps = data_source.EVAL_IMAGES // args.eval_batch_size
 eval_iter = iter(data_source.eval_ds)
+
+
+args.seed = args.seed + 42
+data_source_labeled = input_pipeline.CIFAR10DataSource(args)
+train_ds_labeled = data_source_labeled.train_ds
+train_iter_labeled = iter(train_ds_labeled)
 print("data init finished")
 
 print("model init started")
@@ -62,7 +68,7 @@ sys.stdout.flush()
 
 for epoch in range(1, num_epochs + 1):
     key, subkey = jax.random.split(key)
-    state, train_metrics, replay_buffer = train_epoch(state, train_iter, epoch, steps_per_epoch, replay_buffer, subkey, args) 
+    state, train_metrics, replay_buffer = train_epoch(state, train_iter, train_iter_labeled, epoch, steps_per_epoch, replay_buffer, subkey, args) 
     test_loss, test_accuracy = eval_model(state.params, eval_iter, eval_steps)
     print('Testing - epoch: %d, loss: %.2f, accuracy: %.2f' % (epoch, test_loss, test_accuracy * 100))
     if epoch % args.ckpt_every == 0:
