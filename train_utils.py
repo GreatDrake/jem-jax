@@ -1,6 +1,7 @@
 import jax
 import jax.numpy as jnp               # JAX NumPy
 from jax import grad
+import jax.lax as lax
 
 import flax
 from flax import linen as nn          # The Linen API
@@ -24,19 +25,12 @@ import models
 from jax.config import config
 #config.update("jax_enable_x64", True)
 
-#WRN = functools.partial(jax_resnet.WideResNet50, norm_cls=None, n_classes=10)
-#WRN = functools.partial(jax_resnet.WideResNet50, n_classes=10)
-#WRN = functools.partial(jax_resnet.ResNet50, norm_cls=None, n_classes=10)
-#WRN = functools.partial(jax_resnet.ResNet50, n_classes=10)
-#WRN = functools.partial(jax_resnet.ResNet18, norm_cls=None, n_classes=10)
+WRN = functools.partial(models.WideResNet, num_classes=10, depth=28, widen_factor=10)
 
-WRN = functools.partial(models.CNN)
-
-#WRN = functools.partial(models.WideResNet, num_classes=10, depth=28, widen_factor=1)
+#WRN = functools.partial(models.CNN)
 
 def generate_init_sample(key, shape, args):
     return jax.random.uniform(key, shape=shape, minval=-1, maxval=1)
-    #return 0.1 * jax.random.normal(key, shape=shape)
 
 def compute_metrics(logits, labels):
     loss = jnp.mean(optax.softmax_cross_entropy(logits, jax.nn.one_hot(labels, num_classes=10)))
@@ -85,52 +79,39 @@ def train_step_dumb(state, batch, start_x, rng_keys, dummy_1, dummy_2, dummy_3):
     metrics["weights_norm"] = jnp.linalg.norm(jax.tree_util.tree_leaves(jax.tree_map(jnp.linalg.norm, state.params['params'])))
     return state, metrics, start_x
 
-@functools.partial(jax.jit, static_argnums=(4, 5, 6))
-def train_step(state, batch, x_t, rng_keys, sgld_lr, sgld_std, p_x_weight):
-    def log_prob(images, params):
-        logits, _ = WRN().apply(params, images, mutable="batch_stats")
-        return jax.scipy.special.logsumexp(logits, axis=1).sum()
-    log_prob_grad = jax.grad(log_prob, argnums=0)
 
-    #sgld_step = lambda t, x_t: sgld_lr * log_prob_grad(x_t) + sgld_std * jax.random.normal(rng_keys[t], shape=x_t.shape) + x_t
-    #x_t = jax.lax.fori_loop(0, len(rng_keys), sgld_step, x_t)
 
-    for t in range(len(rng_keys)):
-        x_t += sgld_lr * log_prob_grad(x_t, state.params) + sgld_std * jax.random.normal(rng_keys[t], shape=x_t.shape)
-    #x_t = jnp.clip(x_t, -1, 1)    
+def log_prob(images, params):
+    logits, _ = WRN().apply(params, images, mutable="batch_stats")
+    return jax.scipy.special.logsumexp(logits, axis=1).sum()
+log_prob_grad = jax.grad(log_prob, argnums=0)
 
-    def loss_fn(params, x, x_hat):
-        logits, _ = WRN().apply(params, x, mutable="batch_stats")
-        logits_hat, _ = WRN().apply(params, x_hat, mutable="batch_stats")
-
-        clf_loss = jnp.mean(optax.softmax_cross_entropy(
-            logits=logits, 
-            labels=jax.nn.one_hot(batch['label'], num_classes=10)))
+def loss_fn(params, x_lab, y_lab, x, x_hat):
+    logits_clf, _ = WRN().apply(params, x_lab, mutable="batch_stats")
+    clf_loss = jnp.mean(optax.softmax_cross_entropy(
+        logits=logits_clf, 
+        labels=jax.nn.one_hot(y_lab, num_classes=10)))
         
-        lse_x_hat = jnp.mean(jax.scipy.special.logsumexp(logits_hat, axis=1))
-        lse_x = jnp.mean(jax.scipy.special.logsumexp(logits, axis=1))
+    logits, _ = WRN().apply(params, x, mutable="batch_stats")
+    logits_hat, _ = WRN().apply(params, x_hat, mutable="batch_stats")
+    
+    lse_x_hat = jnp.mean(jax.scipy.special.logsumexp(logits_hat, axis=1))
+    lse_x = jnp.mean(jax.scipy.special.logsumexp(logits, axis=1))
         
-        gen_loss = lse_x_hat - lse_x
-
-        return clf_loss + p_x_weight * gen_loss, (logits, lse_x_hat, lse_x)
-        #return clf_loss, (logits, lse_x_hat, lse_x)
-        
-        #exp_xy = jnp.mean((logits * jax.nn.one_hot(batch['label'], num_classes=10)).sum(axis=1))
-        #return -exp_xy + lse_x_hat, (logits, lse_x_hat, lse_x)
-
+    gen_loss = lse_x_hat - lse_x
+    
+    return clf_loss + gen_loss, (logits_clf, lse_x_hat, lse_x)
+grad_fn = jax.value_and_grad(loss_fn, argnums=0, has_aux=True)
  
-    grad_fn = jax.value_and_grad(loss_fn, argnums=0, has_aux=True)
-    (_, (logits, lse_x_hat, lse_x)), grads = grad_fn(state.params, batch['image'], x_t)
-   
-    #state = jax.lax.cond(
-    #    lse_x_hat > 0,
-    #    lambda _: state.apply_gradients(grads=grads),
-    #    lambda _: state,
-    #    operand=None) 
-    state = state.apply_gradients(grads=grads)
-    #state = state.apply_gradients(grads=clip_grad_norm(grads, 15))
+@functools.partial(jax.jit, static_argnums=(5, 6, 7))
+def train_step(state, batch_gen, batch_cls, x_t, rng_keys, sgld_lr, sgld_std, p_x_weight):
+    x_t = lax.fori_loop(0, rng_keys.shape[0], lambda t, x_t: x_t + sgld_lr * log_prob_grad(x_t, state.params) + sgld_std * jax.random.normal(rng_keys[t], shape=x_t.shape), x_t) 
 
-    metrics = compute_metrics(logits, batch['label'])
+    (_, (logits, lse_x_hat, lse_x)), grads = grad_fn(state.params, batch_cls['image'], batch_cls['label'], batch_gen['image'], x_t)
+   
+    state = state.apply_gradients(grads=grads)
+
+    metrics = compute_metrics(logits, batch_cls['label'])
     metrics["lse_x_hat"] = lse_x_hat
     metrics["lse_x"] = lse_x
     metrics["grad_norm"] = jnp.linalg.norm(jax.tree_util.tree_leaves(jax.tree_map(jnp.linalg.norm, grads))) 
@@ -154,34 +135,27 @@ def print_metrics(metrics, args):
     print('gradient norm: %.4f' % (metrics[-1]['grad_norm']))
     stdout.flush()
 
-def train_epoch(state, train_iter, epoch, steps_per_epoch, replay_buffer, key, args):
+def train_epoch(state, train_iter, train_iter_labeled, epoch, steps_per_epoch, replay_buffer, key, args):
     batch_metrics = []
     step_fn = train_step_dumb if args.xent_only == 1 else train_step
 
-    for step, batch in zip(range(steps_per_epoch), train_iter):
+    for step in range(steps_per_epoch):  
         if step > 0 and step % args.print_every == 0:
             print(step * args.batch_size)
             print_metrics(jax.device_get(batch_metrics), args)
 
-        batch = to_jax_batch(batch)
+        batch_gen = to_jax_batch(next(train_iter)) 
+        batch_cls = to_jax_batch(next(train_iter_labeled))
 
         key, *train_keys = jax.random.split(key, num=args.sgld_steps + 10)
 
-        #start_x = batch['image']
-        
-        #start_x = generate_init_sample(train_keys[0], batch['image'].shape, args)
-        #cnt_old = jax.random.bernoulli(train_keys[1], shape=(args.batch_size,), p=1 - args.reinit_freq).sum()
-        #old_idx = jax.random.randint(train_keys[2], shape=(args.batch_size,), minval=0, maxval=replay_buffer.shape[0])
-
-        #start_x = jax.ops.index_update(start_x, jnp.arange(cnt_old), replay_buffer[old_idx[:cnt_old]])
-
         inds = jax.random.randint(train_keys[0], shape=(args.batch_size,), minval=0, maxval=replay_buffer.shape[0])
         buffer_samples = replay_buffer[inds]
-        random_samples = generate_init_sample(train_keys[1], batch['image'].shape, args)
-        choose_random = (jax.random.uniform(train_keys[2], shape=(batch['image'].shape[0], ), minval=0, maxval=1) < args.reinit_freq)[:, None, None, None]
+        random_samples = generate_init_sample(train_keys[1], batch_gen['image'].shape, args)
+        choose_random = (jax.random.uniform(train_keys[2], shape=(batch_gen['image'].shape[0], ), minval=0, maxval=1) < args.reinit_freq)[:, None, None, None]
         start_x = choose_random * random_samples + (1 - choose_random) * buffer_samples
 
-        state, metrics, samples = step_fn(state, batch, start_x, train_keys[-args.sgld_steps:], args.sgld_lr, args.sgld_std, args.p_x_weight)
+        state, metrics, samples = step_fn(state, batch_gen, batch_cls, start_x, jnp.array(train_keys[-args.sgld_steps:]), args.sgld_lr, args.sgld_std, args.p_x_weight)
         
         batch_metrics.append(metrics)
 
@@ -215,9 +189,8 @@ def prepare_state(args):
         return schedule
 
     schedule_fn = warmup_and_staircase(args.lr, args.warmup_iters)
-    tx = optax.adamw(learning_rate=schedule_fn, weight_decay=args.weight_decay)
-    #tx = optax.adam(learning_rate=schedule_fn)
-    #tx = optax.sgd(learning_rate=schedule_fn, momentum=0.9)
+    #tx = optax.adamw(learning_rate=schedule_fn, weight_decay=args.weight_decay)
+    tx = optax.adam(learning_rate=args.lr)
   
     state = train_state.TrainState.create(apply_fn=cnn.apply, params=params, tx=tx)
 
